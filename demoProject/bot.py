@@ -10,6 +10,7 @@ from nasa.nasa_api import fetch_nasa_apod
 logger = setup_logger(__name__, log_level=logging.INFO)
 
 TOKEN = os.getenv('TOKEN')
+CHANNEL_ID = os.getenv('CHANNEL_ID')
 
 if not TOKEN:
     logger.error("TOKEN is not set. Please set the TOKEN environment variable.")
@@ -51,6 +52,22 @@ def send_version(message):
     bot.reply_to(message, f'Tokens count: {tokens_count}\nCharacters count: {characters}')
     bot.reply_to(message, f'Answer gigachat - {content}')
     logger.info(f"User {message.from_user.username} ({message.from_user.id}) sent: {message.text}")
+
+
+# Example: /publish 2022-02-28
+@bot.message_handler(commands=['publish'])
+def publish_to_channel(message):
+    try:
+        date = message.text.split('/publish ')[-1] if len(message.text.split()) > 1 else None
+        explanation, url, hdurl = fetch_nasa_apod(date)
+        response = f"{explanation}\n\n[URL]({url})\n[HD URL]({hdurl})"
+        bot.send_message(CHANNEL_ID, response, parse_mode='Markdown')
+        bot.reply_to(message, "Message published to channel!")
+        logger.info(
+            f"Message published to channel {CHANNEL_ID} by {message.from_user.username} ({message.from_user.id})")
+    except Exception as e:
+        bot.reply_to(message, "Failed to publish message to channel.")
+        logger.error(f"Failed to publish message to channel {CHANNEL_ID}: {e}")
 
 
 @bot.message_handler(func=lambda message: True)
