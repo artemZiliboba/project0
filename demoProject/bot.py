@@ -2,10 +2,13 @@ import logging
 import os
 
 import telebot
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from logger_setup import setup_logger
 from nasa.gigachat import post_get_token, count_tokens, ask_chat
 from nasa.nasa_api import fetch_nasa_apod
+
+EMPTY_NEWS = "Новость не найдена!"
 
 logger = setup_logger(__name__, log_level=logging.INFO)
 
@@ -17,6 +20,7 @@ if not TOKEN:
     raise ValueError("TOKEN is not set.")
 
 bot = telebot.TeleBot(TOKEN)
+storage = {}
 
 
 @bot.message_handler(commands=['version'])
@@ -34,6 +38,8 @@ def send_apod(message):
 
     # Получаем данные с API NASA
     explanation, url, hdurl = fetch_nasa_apod(date)
+
+    # Получаем данные из GigaChat
     access_token, expires_at = post_get_token()
     content = ask_chat(access_token, "Переведи на русский - " + explanation)
 
@@ -61,13 +67,54 @@ def publish_to_channel(message):
         date = message.text.split('/publish ')[-1] if len(message.text.split()) > 1 else None
         explanation, url, hdurl = fetch_nasa_apod(date)
         response = f"{explanation}\n\n[URL]({url})\n[HD URL]({hdurl})"
-        bot.send_message(CHANNEL_ID, response, parse_mode='Markdown')
-        bot.reply_to(message, "Message published to channel!")
-        logger.info(
-            f"Message published to channel {CHANNEL_ID} by {message.from_user.username} ({message.from_user.id})")
+        storage[message.chat.id] = response
+
+        # Создаем инлайн-кнопку
+        markup = InlineKeyboardMarkup()
+        publish_button = InlineKeyboardButton("✅ Опубликовать", callback_data="publish_news")
+        decline_button = InlineKeyboardButton("❌ Удалить", callback_data="decline_news")
+        markup.add(publish_button, decline_button)
+
+        bot.reply_to(message, response, reply_markup=markup, parse_mode='Markdown')
     except Exception as e:
         bot.reply_to(message, "Failed to publish message to channel.")
         logger.error(f"Failed to publish message to channel {CHANNEL_ID}: {e}")
+
+
+# Обработчик нажатий на инлайн-кнопки
+@bot.callback_query_handler(func=lambda call: call.data == "publish_news")
+def handle_publish_news(call):
+    try:
+        # Получаем текст для публикации из хранилища
+        response = storage.get(call.message.chat.id, EMPTY_NEWS)
+
+        if response != EMPTY_NEWS:
+            bot.send_message(CHANNEL_ID, response, parse_mode='Markdown')
+            bot.answer_callback_query(call.id, "Новость опубликована в канал!")
+            logger.info(f"News published to channel {CHANNEL_ID} by inline button.")
+        else:
+            bot.answer_callback_query(call.id, EMPTY_NEWS)
+
+    except Exception as e:
+        bot.answer_callback_query(call.id, "Произошла ошибка при публикации.")
+        logger.error(f"Failed to publish news to channel {CHANNEL_ID}: {e}")
+
+
+# Обработчик нажатия на кнопку "Не публиковать"
+@bot.callback_query_handler(func=lambda call: call.data == "decline_news")
+def handle_decline_news(call):
+    try:
+        # Удаляем новость из хранилища (если нужно)
+        storage.pop(call.message.chat.id, None)
+
+        # Отвечаем пользователю
+        bot.answer_callback_query(call.id, "Новость не опубликована.")
+        bot.send_message(call.message.chat.id, "Новость была отклонена и не опубликована.")
+        logger.info(f"News declined by {call.from_user.username} ({call.from_user.id})")
+
+    except Exception as e:
+        bot.answer_callback_query(call.id, "Произошла ошибка при отклонении новости.")
+        logger.error(f"Failed to decline news: {e}")
 
 
 @bot.message_handler(func=lambda message: True)
