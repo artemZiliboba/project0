@@ -31,9 +31,12 @@ def fetch_nasa_apod(date=None):
         explanation = data.get('explanation')
         image_url = data.get('url')
         hd_image_url = data.get('hdurl')
+        media_type = data.get('media_type')
+        title = data.get('title')
+        date = data.get('date')
 
         logger.info(f"Successfully retrieved data for date: {date}")
-        return explanation, image_url, hd_image_url
+        return explanation, image_url, hd_image_url, media_type, title, date
 
     except requests.exceptions.RequestException as e:
         logger.error(f"An error occurred while requesting data: {e}")

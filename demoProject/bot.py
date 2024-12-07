@@ -65,9 +65,19 @@ def send_version(message):
 def publish_to_channel(message):
     try:
         date = message.text.split('/publish ')[-1] if len(message.text.split()) > 1 else None
-        explanation, url, hdurl = fetch_nasa_apod(date)
-        response = f"{explanation}\n\n[URL]({url})\n[HD URL]({hdurl})"
-        storage[message.chat.id] = response
+        explanation, url, hdurl, media_type, title, date = fetch_nasa_apod(date)
+
+        # Переводим в GigaChat
+        access_token, expires_at = post_get_token()
+        content = ask_chat(access_token, "Переведи на русский - " + explanation)
+
+        response = f"*📷 {date} - {title}*\n\n{content}\n\n[URL]({url})\n[HD URL]({hdurl})"
+
+        # Сохраняем все данные в хранилище
+        storage[message.chat.id] = {
+            "response": response,
+            "photo_url": url,
+        }
 
         # Создаем инлайн-кнопку
         markup = InlineKeyboardMarkup()
@@ -75,7 +85,7 @@ def publish_to_channel(message):
         decline_button = InlineKeyboardButton("❌ Удалить", callback_data="decline_news")
         markup.add(publish_button, decline_button)
 
-        bot.reply_to(message, response, reply_markup=markup, parse_mode='Markdown')
+        bot.send_photo(message.chat.id, url, caption=response, parse_mode='Markdown', reply_markup=markup)
     except Exception as e:
         bot.reply_to(message, "Failed to publish message to channel.")
         logger.error(f"Failed to publish message to channel {CHANNEL_ID}: {e}")
@@ -85,15 +95,22 @@ def publish_to_channel(message):
 @bot.callback_query_handler(func=lambda call: call.data == "publish_news")
 def handle_publish_news(call):
     try:
-        # Получаем текст для публикации из хранилища
-        response = storage.get(call.message.chat.id, EMPTY_NEWS)
+        # Получаем сохраненные данные из хранилища
+        data = storage.pop(call.message.chat.id, None)
 
-        if response != EMPTY_NEWS:
-            bot.send_message(CHANNEL_ID, response, parse_mode='Markdown')
+        if data:
+            # Публикуем фото с описанием в канал
+            bot.send_photo(
+                CHANNEL_ID,
+                data["photo_url"],
+                caption=data["response"],
+                parse_mode='Markdown'
+            )
             bot.answer_callback_query(call.id, "Новость опубликована в канал!")
-            logger.info(f"News published to channel {CHANNEL_ID} by inline button.")
+            logger.info(f"Новость опубликована в канал {CHANNEL_ID} кнопкой 'Опубликовать'.")
         else:
-            bot.answer_callback_query(call.id, EMPTY_NEWS)
+            bot.answer_callback_query(call.id, "Новость не найдена!")
+            logger.warning(f"Нет данных для публикации для чата {call.message.chat.id}.")
 
     except Exception as e:
         bot.answer_callback_query(call.id, "Произошла ошибка при публикации.")
